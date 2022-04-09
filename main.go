@@ -21,7 +21,7 @@ type Log struct {
 }
 
 func NewLogger(filaName string, fileOnly bool, consoleOnly bool, size int) *Log {
-	ch := make(chan []string, 20)
+	ch := make(chan []string, size)
 	done := make(chan struct{})
 	// file, err := os.OpenFile(filaName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	// if err != nil {
