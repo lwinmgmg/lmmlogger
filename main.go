@@ -14,36 +14,35 @@ type Logger interface {
 }
 
 type Log struct {
-	Chan     chan string
+	Chan     chan []string
 	Done     chan struct{}
 	Filename string
 	Format   string
 }
 
-func NewLogger(filaName string, fileOnly bool, consoleOnly bool) *Log {
-	ch := make(chan string, 20)
+func NewLogger(filaName string, fileOnly bool, consoleOnly bool, size int) *Log {
+	ch := make(chan []string, 20)
 	done := make(chan struct{})
-	file, err := os.OpenFile(filaName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
-		fmt.Println("Can't Open file")
-		return nil
-	}
-	go func(ch <-chan string, doneCh <-chan struct{}) {
-		var mesg string
-	forLoop:
+	// file, err := os.OpenFile(filaName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	// if err != nil {
+	// 	fmt.Println("Can't Open file")
+	// 	return nil
+	// }
+	go func(ch <-chan []string, doneCh <-chan struct{}) {
+		var mesg []string
 		for {
 			select {
 			case mesg = <-ch:
 				if !fileOnly {
 					fmt.Println(mesg)
 				}
-				if !consoleOnly{
-					if err = writeToAFile(file, mesg); err != nil {
-						fmt.Println("Can't write to log file")
-					}
+				if !consoleOnly {
+					// if err = writeToAFile(file, mesg); err != nil {
+					// 	fmt.Println("Can't write to log file")
+					// }
 				}
 			case <-done:
-				break forLoop
+				return
 			}
 		}
 	}(ch, done)
@@ -72,13 +71,13 @@ func convertToLogFormat(mesg string, level string, multiStr []string) string {
 }
 
 func (self Log) Info(firstStr string, multiStr ...string) {
-	self.Chan <- convertToLogFormat(firstStr, "INFO", multiStr)
+	self.Chan <- append([]string{firstStr}, multiStr...)
 }
 func (self Log) Error(firstStr string, multiStr ...string) {
-	self.Chan <- convertToLogFormat(firstStr, "ERROR", multiStr)
+	self.Chan <- append([]string{firstStr}, multiStr...)
 }
 func (self Log) Warning(firstStr string, multiStr ...string) {
-	self.Chan <- convertToLogFormat(firstStr, "WARNING", multiStr)
+	self.Chan <- append([]string{firstStr}, multiStr...)
 }
 func (self Log) Close() {
 	close(self.Done)
