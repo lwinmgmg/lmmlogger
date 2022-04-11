@@ -1,57 +1,174 @@
 package lmmlogger
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
 )
 
+const (
+	DefaultFormat        string = "%v"
+	DefaultFileSize      int64  = 10 * 1024 * 1024 // 10MB log file size default
+	DefaultRotationCount int    = 1
+)
+
+func DefaultFormatFunction() interface{} {
+	return time.Now().Format(time.RFC1123Z)
+}
+
+func MoveFileRotation(fileName string, count int) (*os.File, error) {
+	for i := count; i > 0; i-- {
+		newFileName := fmt.Sprintf("%v%v", fileName, i)
+		oldFileName := fileName
+		if i-1 != 0 {
+			oldFileName = fmt.Sprintf("%v%v", fileName, i-1)
+		}
+		err := os.Rename(oldFileName, newFileName)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("Error On File Move : %w", err)
+		}
+	}
+	file, err := os.OpenFile(fileName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("Error On Creating New Log File : %w", err)
+	}
+	return file, nil
+}
+
 type Logger interface {
-	Info(string, ...string)
-	Error(string, ...string)
-	Warning(string, ...string)
+	Infof(string, ...interface{})
+	Errorf(string, ...interface{})
+	Warningf(string, ...interface{})
+	Criticalf(string, ...interface{})
 	Close()
 }
 
-type Log struct {
-	Chan     chan []string
-	Done     chan struct{}
-	Filename string
-	Format   string
+type LogRotationOptions struct {
+	MaxSize        int64
+	NumberOfBackup int
 }
 
-func NewLogger(filaName string, fileOnly bool, consoleOnly bool, size int) *Log {
-	ch := make(chan []string, size)
+func (self *LogRotationOptions) SetDefaultValue() {
+	if self.MaxSize < 1 {
+		self.MaxSize = DefaultFileSize
+	}
+	if self.NumberOfBackup < 1 {
+		self.NumberOfBackup = DefaultRotationCount
+	}
+}
+
+func (self LogRotationOptions) IsNil() bool {
+	return self.MaxSize == 0 && self.NumberOfBackup == 0
+}
+
+func (self LogRotationOptions) DoFileRotation(oldFile *os.File, logger *Log) *os.File {
+	fileInfo, err := oldFile.Stat()
+	if err != nil {
+		logger.Error("Error On Rotating Log File On File Stat")
+	}
+	if fileInfo.Size() > self.MaxSize {
+		RemoveFileName := fmt.Sprintf("%v%v", oldFile.Name(), self.NumberOfBackup)
+		err = os.Remove(RemoveFileName)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			logger.Errorf("%v", err)
+			return oldFile
+		}
+		newFile, err := MoveFileRotation(oldFile.Name(), self.NumberOfBackup)
+		if err != nil {
+			logger.Errorf("%v", err)
+			return oldFile
+		}
+		return newFile
+	}
+	return oldFile
+}
+
+type Log struct {
+	Chan               chan Message
+	Done               chan struct{}
+	WaitForPendingDone bool
+	CurrentFile        *os.File
+}
+
+type Param struct {
+	FileName           string
+	FileOptions        LogRotationOptions
+	ConsoleOnly        bool
+	PandingSize        int
+	WaitForPendingDone bool
+	MaxThread          int8
+	Format             string
+	FormatFunctions    []func() interface{}
+}
+
+func NewLogger(params Param) (*Log, error) {
+	if params.PandingSize == 0 {
+		params.PandingSize = 100 // 100 panding logs are allow; Who will write 100 log in one second?
+	}
+	if params.MaxThread == 0 {
+		params.MaxThread = 1
+	}
+	if params.FileName == "" {
+		params.ConsoleOnly = true
+	}
+	if !params.FileOptions.IsNil() {
+		params.FileOptions.SetDefaultValue()
+	}
+	if params.Format == "" {
+		params.Format = DefaultFormat
+		params.FormatFunctions = []func() interface{}{DefaultFormatFunction}
+	}
+	ch := make(chan Message, params.PandingSize)
 	done := make(chan struct{})
-	// file, err := os.OpenFile(filaName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	// if err != nil {
-	// 	fmt.Println("Can't Open file")
-	// 	return nil
-	// }
-	go func(ch <-chan []string, doneCh <-chan struct{}) {
-		var mesg []string
+	OutputLog := Log{
+		Chan:               ch,
+		Done:               done,
+		WaitForPendingDone: params.WaitForPendingDone,
+	}
+	funcLen := len(params.FormatFunctions)
+	var file *os.File
+	var err error
+	if !params.ConsoleOnly {
+		file, err = os.OpenFile(params.FileName, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+		OutputLog.CurrentFile = file
+	}
+	if err != nil {
+		OutputLog.Errorf("Error On Creating Log File : %v", err)
+		params.ConsoleOnly = true
+		return &OutputLog, fmt.Errorf("Error On Creating Log File : %w", err) // Returned error but you can still use console logger
+	}
+	go func(ch <-chan Message, doneCh <-chan struct{}) {
 		for {
 			select {
-			case mesg = <-ch:
-				if !fileOnly {
-					fmt.Println(mesg)
+			case mesg := <-ch:
+				formatInterface := make([]interface{}, funcLen, funcLen)
+				for k, v := range params.FormatFunctions {
+					formatInterface[k] = v()
 				}
-				if !consoleOnly {
-					// if err = writeToAFile(file, mesg); err != nil {
-					// 	fmt.Println("Can't write to log file")
-					// }
+				originalFormat := fmt.Sprintf(params.Format, formatInterface...)
+				newFormat := fmt.Sprintf("%v %v %v\n", originalFormat, mesg.Level, mesg.Format)
+				mesgStr := fmt.Sprintf(newFormat, mesg.Params...)
+				if params.ConsoleOnly {
+					fmt.Print(mesgStr)
+				} else {
+					file.Write([]byte(mesgStr))
+					if !params.FileOptions.IsNil() {
+						file = params.FileOptions.DoFileRotation(file, &OutputLog)
+					}
 				}
 			case <-done:
 				return
 			}
 		}
 	}(ch, done)
-	return &Log{
-		Chan:     ch,
-		Done:     done,
-		Filename: filaName,
-		Format:   "abcd",
-	}
+	return &OutputLog, nil
+}
+
+type Message struct {
+	Format string
+	Params []interface{}
+	Level  string
 }
 
 func writeToAFile(file *os.File, mesg string) error {
@@ -61,30 +178,46 @@ func writeToAFile(file *os.File, mesg string) error {
 	return nil
 }
 
-func convertToLogFormat(mesg string, level string, multiStr []string) string {
-	tempMessage := fmt.Sprintf("%v  %-7s  %v", time.Now().Format(time.RFC1123), level, mesg)
-	tmp := make([]interface{}, len(multiStr))
-	for i, val := range multiStr {
-		tmp[i] = val
-	}
-	return fmt.Sprintf(tempMessage, tmp...)
+func (self Log) Info(input ...interface{}) {
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "  INFO  "}
+}
+func (self Log) Infof(format string, params ...interface{}) {
+	self.Chan <- Message{Format: format, Params: params, Level: "  INFO  "}
 }
 
-func (self Log) Info(firstStr string, multiStr ...string) {
-	self.Chan <- append([]string{firstStr}, multiStr...)
+func (self Log) Error(input ...interface{}) {
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "  ERROR "}
 }
-func (self Log) Error(firstStr string, multiStr ...string) {
-	self.Chan <- append([]string{firstStr}, multiStr...)
+func (self Log) Errorf(format string, params ...interface{}) {
+	self.Chan <- Message{Format: format, Params: params, Level: "  ERROR "}
 }
-func (self Log) Warning(firstStr string, multiStr ...string) {
-	self.Chan <- append([]string{firstStr}, multiStr...)
+
+func (self Log) Warningf(format string, params ...interface{}) {
+	self.Chan <- Message{Format: format, Params: params, Level: " WARNING"}
 }
+func (self Log) Warning(input ...interface{}) {
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: " WARNING"}
+}
+
+func (self Log) Criticalf(format string, params ...interface{}) {
+	self.Chan <- Message{Format: format, Params: params, Level: "CRITICAL"}
+}
+func (self Log) Critical(input ...interface{}) {
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "CRITICAL"}
+}
+
 func (self Log) Close() {
-	close(self.Done)
-}
-
-func searcher(sec int) string {
-	secInMilli := 1000 * sec
-	time.Sleep(time.Millisecond * time.Duration(secInMilli))
-	return fmt.Sprintf("Time in %v", sec)
+	for {
+		if self.WaitForPendingDone {
+			if len(self.Chan) == 0 {
+				self.Done <- struct{}{}
+				return
+			} else {
+				time.Sleep(time.Millisecond * 100)
+			}
+		} else {
+			break
+		}
+	}
+	self.Done <- struct{}{}
 }
