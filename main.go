@@ -138,7 +138,7 @@ func NewLogger(params Param) (*Log, error) {
 	}
 	ch := make(chan Message, params.PendingSize)
 	var DefaultLevel int8 = 2 // INFO
-	if val, ok := DefaultLevel[params.LogLevel]; ok {
+	if val, ok := LogLevelPriority[params.LogLevel]; ok {
 		DefaultLevel = val
 	}
 	done := make(chan struct{})
