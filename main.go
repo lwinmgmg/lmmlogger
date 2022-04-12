@@ -13,6 +13,16 @@ const (
 	DefaultRotationCount int    = 1
 )
 
+var (
+	LogLevelPriority map[string]int8 = map[string]int8{
+		"DEBUG":    1,
+		"INFO":     2,
+		"WARNING":  3,
+		"ERROR":    4,
+		"CRITICAL": 5,
+	}
+)
+
 func DefaultFormatFunction() interface{} {
 	return time.Now().Format(time.RFC1123Z)
 }
@@ -37,6 +47,12 @@ func MoveFileRotation(fileName string, count int) (*os.File, error) {
 }
 
 type Logger interface {
+	Debug(...interface{})
+	Info(...interface{})
+	Error(...interface{})
+	Warning(...interface{})
+	Critical(...interface{})
+	Debugf(string, ...interface{})
 	Infof(string, ...interface{})
 	Errorf(string, ...interface{})
 	Warningf(string, ...interface{})
@@ -93,9 +109,10 @@ type Log struct {
 
 type Param struct {
 	FileName           string
-	FileOptions        LogRotationOptions
+	LogRotationOptions LogRotationOptions
+	LogLevel           string
 	ConsoleOnly        bool
-	PandingSize        int
+	PendingSize        int
 	WaitForPendingDone bool
 	MaxThread          int8
 	Format             string
@@ -103,8 +120,8 @@ type Param struct {
 }
 
 func NewLogger(params Param) (*Log, error) {
-	if params.PandingSize == 0 {
-		params.PandingSize = 100 // 100 panding logs are allow; Who will write 100 log in one second?
+	if params.PendingSize == 0 {
+		params.PendingSize = 100 // 100 panding logs are allow; Who will write 100 log in one second?
 	}
 	if params.MaxThread == 0 {
 		params.MaxThread = 1
@@ -112,14 +129,18 @@ func NewLogger(params Param) (*Log, error) {
 	if params.FileName == "" {
 		params.ConsoleOnly = true
 	}
-	if !params.FileOptions.IsNil() {
-		params.FileOptions.SetDefaultValue()
+	if !params.LogRotationOptions.IsNil() {
+		params.LogRotationOptions.SetDefaultValue()
 	}
 	if params.Format == "" {
 		params.Format = DefaultFormat
 		params.FormatFunctions = []func() interface{}{DefaultFormatFunction}
 	}
-	ch := make(chan Message, params.PandingSize)
+	ch := make(chan Message, params.PendingSize)
+	var DefaultLevel int8 = 2 // INFO
+	if val, ok := DefaultLevel[params.LogLevel]; ok {
+		DefaultLevel = val
+	}
 	done := make(chan struct{})
 	OutputLog := Log{
 		Chan:               ch,
@@ -142,6 +163,9 @@ func NewLogger(params Param) (*Log, error) {
 		for {
 			select {
 			case mesg := <-ch:
+				if mesg.Priority < DefaultLevel {
+					continue
+				}
 				formatInterface := make([]interface{}, funcLen, funcLen)
 				for k, v := range params.FormatFunctions {
 					formatInterface[k] = v()
@@ -153,8 +177,8 @@ func NewLogger(params Param) (*Log, error) {
 					fmt.Print(mesgStr)
 				} else {
 					file.Write([]byte(mesgStr))
-					if !params.FileOptions.IsNil() {
-						file = params.FileOptions.DoFileRotation(file, &OutputLog)
+					if !params.LogRotationOptions.IsNil() {
+						file = params.LogRotationOptions.DoFileRotation(file, &OutputLog)
 					}
 				}
 			case <-done:
@@ -166,9 +190,10 @@ func NewLogger(params Param) (*Log, error) {
 }
 
 type Message struct {
-	Format string
-	Params []interface{}
-	Level  string
+	Format   string
+	Params   []interface{}
+	Level    string
+	Priority int8
 }
 
 func writeToAFile(file *os.File, mesg string) error {
@@ -178,32 +203,39 @@ func writeToAFile(file *os.File, mesg string) error {
 	return nil
 }
 
-func (self Log) Info(input ...interface{}) {
-	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "  INFO  "}
+func (self Log) Debug(input ...interface{}) {
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "  DEBUG ", Priority: LogLevelPriority["DEBUG"]}
 }
-func (self Log) Infof(format string, params ...interface{}) {
-	self.Chan <- Message{Format: format, Params: params, Level: "  INFO  "}
+func (self Log) Debugf(format string, params ...interface{}) {
+	self.Chan <- Message{Format: format, Params: params, Level: "  DEBUG ", Priority: LogLevelPriority["DEBUG"]}
 }
 
-func (self Log) Error(input ...interface{}) {
-	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "  ERROR "}
+func (self Log) Info(input ...interface{}) {
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "  INFO  ", Priority: LogLevelPriority["INFO"]}
 }
-func (self Log) Errorf(format string, params ...interface{}) {
-	self.Chan <- Message{Format: format, Params: params, Level: "  ERROR "}
+func (self Log) Infof(format string, params ...interface{}) {
+	self.Chan <- Message{Format: format, Params: params, Level: "  INFO  ", Priority: LogLevelPriority["INFO"]}
 }
 
 func (self Log) Warningf(format string, params ...interface{}) {
-	self.Chan <- Message{Format: format, Params: params, Level: " WARNING"}
+	self.Chan <- Message{Format: format, Params: params, Level: " WARNING", Priority: LogLevelPriority["WARNING"]}
 }
 func (self Log) Warning(input ...interface{}) {
-	self.Chan <- Message{Format: fmt.Sprint(input...), Level: " WARNING"}
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: " WARNING", Priority: LogLevelPriority["WARNING"]}
+}
+
+func (self Log) Error(input ...interface{}) {
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "  ERROR ", Priority: LogLevelPriority["ERROR"]}
+}
+func (self Log) Errorf(format string, params ...interface{}) {
+	self.Chan <- Message{Format: format, Params: params, Level: "  ERROR ", Priority: LogLevelPriority["ERROR"]}
 }
 
 func (self Log) Criticalf(format string, params ...interface{}) {
-	self.Chan <- Message{Format: format, Params: params, Level: "CRITICAL"}
+	self.Chan <- Message{Format: format, Params: params, Level: "CRITICAL", Priority: LogLevelPriority["CRITICAL"]}
 }
 func (self Log) Critical(input ...interface{}) {
-	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "CRITICAL"}
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "CRITICAL", Priority: LogLevelPriority["CRITICAL"]}
 }
 
 func (self Log) Close() {
