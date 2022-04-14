@@ -204,38 +204,38 @@ func writeToAFile(file *os.File, mesg string) error {
 }
 
 func (self Log) Debug(input ...interface{}) {
-	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "  DEBUG ", Priority: LogLevelPriority["DEBUG"]}
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "\033[34m  DEBUG \033[0m", Priority: LogLevelPriority["DEBUG"]}
 }
 func (self Log) Debugf(format string, params ...interface{}) {
-	self.Chan <- Message{Format: format, Params: params, Level: "  DEBUG ", Priority: LogLevelPriority["DEBUG"]}
+	self.Chan <- Message{Format: format, Params: params, Level: "\033[34m  DEBUG \033[0m", Priority: LogLevelPriority["DEBUG"]}
 }
 
 func (self Log) Info(input ...interface{}) {
-	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "  INFO  ", Priority: LogLevelPriority["INFO"]}
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "\033[32m  INFO  \033[0m", Priority: LogLevelPriority["INFO"]}
 }
 func (self Log) Infof(format string, params ...interface{}) {
-	self.Chan <- Message{Format: format, Params: params, Level: "  INFO  ", Priority: LogLevelPriority["INFO"]}
+	self.Chan <- Message{Format: format, Params: params, Level: "\033[32m  INFO  \033[0m", Priority: LogLevelPriority["INFO"]}
 }
 
 func (self Log) Warningf(format string, params ...interface{}) {
-	self.Chan <- Message{Format: format, Params: params, Level: " WARNING", Priority: LogLevelPriority["WARNING"]}
+	self.Chan <- Message{Format: format, Params: params, Level: "\033[33m WARNING\033[0m", Priority: LogLevelPriority["WARNING"]}
 }
 func (self Log) Warning(input ...interface{}) {
-	self.Chan <- Message{Format: fmt.Sprint(input...), Level: " WARNING", Priority: LogLevelPriority["WARNING"]}
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "\033[33m WARNING\033[0m", Priority: LogLevelPriority["WARNING"]}
 }
 
 func (self Log) Error(input ...interface{}) {
-	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "  ERROR ", Priority: LogLevelPriority["ERROR"]}
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "\033[31m  ERROR \033[0m", Priority: LogLevelPriority["ERROR"]}
 }
 func (self Log) Errorf(format string, params ...interface{}) {
-	self.Chan <- Message{Format: format, Params: params, Level: "  ERROR ", Priority: LogLevelPriority["ERROR"]}
+	self.Chan <- Message{Format: format, Params: params, Level: "\033[31m  ERROR \033[0m", Priority: LogLevelPriority["ERROR"]}
 }
 
 func (self Log) Criticalf(format string, params ...interface{}) {
-	self.Chan <- Message{Format: format, Params: params, Level: "CRITICAL", Priority: LogLevelPriority["CRITICAL"]}
+	self.Chan <- Message{Format: format, Params: params, Level: "\033[31mCRITICAL\033[0m", Priority: LogLevelPriority["CRITICAL"]}
 }
 func (self Log) Critical(input ...interface{}) {
-	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "CRITICAL", Priority: LogLevelPriority["CRITICAL"]}
+	self.Chan <- Message{Format: fmt.Sprint(input...), Level: "\033[31mCRITICAL\033[0m", Priority: LogLevelPriority["CRITICAL"]}
 }
 
 func (self Log) Close() {
